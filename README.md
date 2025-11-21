@@ -11,3 +11,12 @@
 --volume="{path to this project on local}:/home/projects/ros2_ws/src/delivery_package" \
 ```
 after the other `--volume()` flag. 
+
+### Usage:
+
+I only wrote the controller draft so far:
+```bash
+source_ros2
+build_ros2
+ros2 run auto_delivery_pkg mission_controller
+```
