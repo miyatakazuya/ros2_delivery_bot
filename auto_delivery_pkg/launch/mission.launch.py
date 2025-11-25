@@ -43,4 +43,20 @@ def generate_launch_description():
             output='screen'
         ))
 
+    if nodes_config.get('box_detection', False):
+        launch_actions.append(Node(
+            package='auto_delivery_pkg',
+            executable='box_detection',
+            name='box_detection',
+            output='screen'
+        ))
+    
+    if nodes_config.get('apriltag_node', False):
+        launch_actions.append(Node(
+            package='auto_delivery_pkg',
+            executable='apriltag_node',
+            name='apriltag_node',
+            output='screen'
+        ))
+
     return LaunchDescription(launch_actions)

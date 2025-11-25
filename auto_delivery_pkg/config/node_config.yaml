@@ -1,5 +1,7 @@
 # Toggle Nodes (1 is acivated)
 delivery_nodes:
   mission_controller: 0
-  parking_controller: 1
+  parking_controller: 0
   servo_controller: 0
+  box_detection: 0
+  apriltag_node: 0
