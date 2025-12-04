@@ -3,6 +3,7 @@ import math
 import rclpy
 from rclpy.node import Node
 from smbus2 import SMBus
+from std_msgs.msg import String
 
 # ==========================================
 # PCA9685 Driver Class
@@ -66,6 +67,15 @@ class ServoController(Node):
     def __init__(self):
         super().__init__('servo_controller')
         
+        # NEW: acrivation flag + subscriber to /node_control
+        self.active = False
+        self.command_sub = self.create_subscription(
+            String,
+            'node_control',
+            self.command_callback,
+            10
+        )
+        
         # --- Parameters ---
         # Allow these to be configured via launch files or command line
         self.declare_parameter('i2c_bus', 1)
@@ -95,8 +105,36 @@ class ServoController(Node):
         # Timer to toggle servo position every 2 seconds
         self.timer = self.create_timer(2.0, self.timer_callback)
         self.is_open = False # State tracker
+        
+    # NEW: handle "servo_controller:1"/"servo_controller:0"
+    def command_callback(self, msg: String):
+        command = msg.data.strip()
+        try:
+            target, state = command.split(':')
+        except ValueError:
+            self.get_logger().warn(f"Malformed command: '{command}'")
+            return
+
+        if target != 'servo_controller':
+            return
+
+        if state not in ('0', '1'):
+            self.get_logger().warn(f"Unknown state '{state}' for servo_controller")
+            return
+
+        new_active = (state == '1')
+        if new_active != self.active:
+            self.active = new_active
+            self.get_logger().info(
+                f"Activation → {'ACTIVE' if self.active else 'IDLE'}"
+            )
+
 
     def timer_callback(self):
+        # NEW: only run this loop when ACTIVE
+        if not self.active:
+            return
+        
         if self.pca is None:
             self.get_logger().warn('Hardware not connected, skipping control loop.')
             return
