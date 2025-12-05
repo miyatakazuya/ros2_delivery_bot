@@ -6,11 +6,21 @@ import depthai as dai
 import cv2
 import numpy as np
 from pupil_apriltags import Detector
+from std_msgs.msg import String 
 
 class LocalAprilTagNode(Node):
     def __init__(self):
         super().__init__('apriltag_node')
         self.get_logger().info('April Tag Node Started (CPU Detection - Auto Focus)')
+
+        # NEW: activation flag and node_control subscription
+        self.active = False
+        self.command_sub = self.create_subscription(
+            String,
+            'node_control',
+            self.command_callback,
+            10
+        )
 
         self.bridge = CvBridge()
         self.image_pub = self.create_publisher(Image, 'camera/apriltag_image', 10)
@@ -33,7 +43,30 @@ class LocalAprilTagNode(Node):
 
         # Timer loop (30 FPS target)
         self.timer = self.create_timer(0.033, self.timer_callback)
+    
+    # NEW: toggle based on "apriltag_node:1"/"apriltag_node:0"
+    def command_callback(self, msg: String):
+        command = msg.data.strip()
+        try:
+            target, state = command.split(':')
+        except ValueError:
+            self.get_logger().warn(f"Malformed command: '{command}'")
+            return
 
+        if target != 'apriltag_node':
+            return
+
+        if state not in ('0', '1'):
+            self.get_logger().warn(f"Unknown state '{state}' for apriltag_node")
+            return
+
+        new_active = (state == '1')
+        if new_active != self.active:
+            self.active = new_active
+            self.get_logger().info(
+                f"Activation → {'ACTIVE' if self.active else 'IDLE'}"
+            )
+            
     def init_depthai(self):
         pipeline = dai.Pipeline()
 
@@ -64,6 +97,15 @@ class LocalAprilTagNode(Node):
         self.get_logger().info("OAK-D Streaming RGB (640x480). Auto-Focus Enabled.")
 
     def timer_callback(self):
+        # NEW: only process when ACTIVE
+        if not self.active:
+            return
+
+        # NEW: if no camera device, just skip
+        if self.q_rgb is None:
+            self.get_logger().warn("No RGB queue available (no OAK-D?). Skipping frame.")
+            return
+        
         # 1. Get Frame from Camera
         in_rgb = self.q_rgb.tryGet()
 

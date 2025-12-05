@@ -7,11 +7,21 @@ import depthai as dai
 import cv2
 import numpy as np
 import os
+from std_msgs.msg import String
 
 class BoxDetectionNode(Node):
     def __init__(self):
         super().__init__('box_detection')
         self.get_logger().info('--- Box Detection ROS 2 Node Started ---')
+
+        # NEW: activation flag + node_control subscription
+        self.active = False
+        self.command_sub = self.create_subscription(
+            String,
+            'node_control',
+            self.command_callback,
+            10
+        )
 
         # --- CONFIGURATION ---
         self.num_classes = 3
@@ -74,16 +84,54 @@ class BoxDetectionNode(Node):
         xout_nn = pipeline.create(dai.node.XLinkOut)
         xout_nn.setStreamName("nn")
         detection_nn.out.link(xout_nn.input)
+        
+        # NEW: initialize handles
+        self.device = None
+        self.q_rgb = None
+        self.q_nn = None
 
-        # Connect to device
-        self.device = dai.Device(pipeline)
-        
-        self.q_rgb = self.device.getOutputQueue(name="rgb", maxSize=4, blocking=False)
-        self.q_nn = self.device.getOutputQueue(name="nn", maxSize=4, blocking=False)
-        
-        self.get_logger().info("Pipeline initialized. GUI Window should appear shortly.")
+        # MODIFIED: Connect to device (wrapped so it’s safe w/o hardware)
+        try:
+            self.device = dai.Device(pipeline)
+            self.q_rgb = self.device.getOutputQueue(name="rgb", maxSize=4, blocking=False)
+            self.q_nn = self.device.getOutputQueue(name="nn", maxSize=4, blocking=False)
+            self.get_logger().info("Pipeline initialized. GUI Window should appear shortly.")
+        except Exception as e:
+            self.get_logger().error(f"Could not initialize DepthAI pipeline for box_detection: {e}")
+            
+    # NEW: handle "box_detection:1"/"box_detection:0"
+    def command_callback(self, msg: String):
+        command = msg.data.strip()
+        try:
+            target, state = command.split(':')
+        except ValueError:
+            self.get_logger().warn(f"Malformed command: '{command}'")
+            return
+
+        if target != 'box_detection':
+            return
+
+        if state not in ('0', '1'):
+            self.get_logger().warn(f"Unknown state '{state}' for box_detection")
+            return
+
+        new_active = (state == '1')
+        if new_active != self.active:
+            self.active = new_active
+            self.get_logger().info(
+                f"Activation → {'ACTIVE' if self.active else 'IDLE'}"
+            )
 
     def timer_callback(self):
+        # NEW: only run this logic when ACTIVE
+        if not self.active:
+            return
+
+        # NEW: if no queues (no OAK-D), just skip
+        if self.q_rgb is None or self.q_nn is None:
+            self.get_logger().warn("No DepthAI queues available; skipping detection.")
+            return
+        
         in_rgb = self.q_rgb.tryGet()
         in_nn = self.q_nn.tryGet()
 
