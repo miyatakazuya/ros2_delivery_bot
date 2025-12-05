@@ -57,14 +57,14 @@ class MissionController(Node):
           box_detection: 1
           apriltag_node: 1
           parking_controller: 0
-          apriltag_back_node: 0
+          webcam_apriltag: 0
           servo_controller: 0
         """
         self.get_logger().info("[STATE] STARTUP → setting initial node activations")
         self.send_activation("box_detection", 1)
         self.send_activation("apriltag_node", 1)
         self.send_activation("parking_controller", 0)
-        self.send_activation("apriltag_back_node", 0)
+        self.send_activation("webcam_apriltag", 0)
         self.send_activation("servo_controller", 0)
 
     def enter_search(self):
@@ -78,7 +78,7 @@ class MissionController(Node):
         self.send_activation("box_detection", 1)
         self.send_activation("apriltag_node", 1)
         self.send_activation("parking_controller", 0)
-        self.send_activation("apriltag_back_node", 0)
+        self.send_activation("webcam_apriltag", 0)
         self.send_activation("servo_controller", 0)
 
     def enter_align_front(self):
@@ -88,14 +88,14 @@ class MissionController(Node):
           box_detection: 0 (turn off YOLO to save compute)
           apriltag_node: 1 (use front AprilTag to align)
           parking_controller: 0
-          apriltag_back_node: 0
+          webcam_apriltag: 0
           servo_controller: 0
         """
         self.get_logger().info("[STATE] ALIGN_FRONT")
         self.send_activation("box_detection", 0)
         self.send_activation("apriltag_node", 1)
         self.send_activation("parking_controller", 0)
-        self.send_activation("apriltag_back_node", 0)
+        self.send_activation("webcam_apriltag", 0)
         self.send_activation("servo_controller", 0)
 
     def enter_turn_around(self):
@@ -104,14 +104,14 @@ class MissionController(Node):
           mission_controller: 1
           box_detection: 0
           apriltag_node: 0
-          apriltag_back_node: 1 (rear AprilTag)
+          webcam_apriltag: 1 (rear AprilTag)
           parking_controller: 1 (handle 180° maneuver)
           servo_controller: 1 (ON but idle, ready for drop later)
         """
         self.get_logger().info("[STATE] TURN_AROUND")
         self.send_activation("box_detection", 0)
         self.send_activation("apriltag_node", 0)
-        self.send_activation("apriltag_back_node", 1)
+        self.send_activation("webcam_apriltag", 1)
         self.send_activation("parking_controller", 1)
         self.send_activation("servo_controller", 1)
 
@@ -121,14 +121,14 @@ class MissionController(Node):
           mission_controller: 1
           box_detection: 0
           apriltag_node: 0
-          apriltag_back_node: 1
+          webcam_apriltag: 1
           parking_controller: 1 (reverse towards container)
           servo_controller: 1 (still ON, idle)
         """
         self.get_logger().info("[STATE] BACKUP_PARK")
         self.send_activation("box_detection", 0)
         self.send_activation("apriltag_node", 0)
-        self.send_activation("apriltag_back_node", 1)
+        self.send_activation("webcam_apriltag", 1)
         self.send_activation("parking_controller", 1)
         self.send_activation("servo_controller", 1)
 
@@ -138,14 +138,14 @@ class MissionController(Node):
           mission_controller: 1
           box_detection: 0
           apriltag_node: 0
-          apriltag_back_node: 1 (optional: keep ON monitoring)
+          webcam_apriltag: 1 (optional: keep ON monitoring)
           parking_controller: 0 (no more motion)
           servo_controller: 1 (actively tilting bed)
         """
         self.get_logger().info("[STATE] DROP_PACKAGE")
         self.send_activation("box_detection", 0)
         self.send_activation("apriltag_node", 0)
-        self.send_activation("apriltag_back_node", 1)
+        self.send_activation("webcam_apriltag", 1)
         self.send_activation("parking_controller", 0)
         self.send_activation("servo_controller", 1)
 
@@ -158,7 +158,7 @@ class MissionController(Node):
         self.get_logger().info("[STATE] DONE")
         self.send_activation("box_detection", 0)
         self.send_activation("apriltag_node", 0)
-        self.send_activation("apriltag_back_node", 0)
+        self.send_activation("webcam_apriltag", 0)
         self.send_activation("parking_controller", 0)
         self.send_activation("servo_controller", 0)
 
