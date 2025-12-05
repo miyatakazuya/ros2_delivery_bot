@@ -31,6 +31,7 @@ setup(
             'servo_controller = auto_delivery_pkg.servo_controller:main',
             'box_detection = auto_delivery_pkg.box_detection:main',
             'apriltag_node = auto_delivery_pkg.apriltag_node:main',      
+            'apriltag_rear_node = auto_delivery_pkg.webcam_apriltag:main',
         ],
     },
 )

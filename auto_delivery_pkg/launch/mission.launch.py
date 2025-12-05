@@ -59,4 +59,15 @@ def generate_launch_description():
             output='screen'
         ))
 
+
+    if nodes_config.get('apriltag_rear_node', False):
+        launch_actions.append(Node(
+            package='auto_delivery_pkg',
+            executable='apriltag_rear_node', # Matches setup.py entry point
+            name='apriltag_rear_node',
+            output='screen',
+            # Add this line to select the correct camera index (e.g., 1 or 2)
+            parameters=[{'device_id': 1}] 
+        ))
+
     return LaunchDescription(launch_actions)

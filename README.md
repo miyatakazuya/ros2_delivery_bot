@@ -39,6 +39,7 @@
 - If you are using the `robocar_docker` shell command, add this line:
 ```
 --volume="{path to this project on local}:/home/projects/ros2_ws/src/delivery_package" \
+-e PYTHONUNBUFFERED=1 \
 ```
 after the other `--volume()` flag. 
 

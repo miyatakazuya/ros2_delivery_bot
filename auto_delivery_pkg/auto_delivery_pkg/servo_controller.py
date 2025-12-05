@@ -37,12 +37,20 @@ class PCA9685:
         prescale = int(math.floor(prescale_val + 0.5))
 
         oldmode = self.read_byte(0x00)
-        newmode = (oldmode & 0x7F) | 0x10  # sleep
-        self.write_byte(0x00, newmode)     # go to sleep
-        self.write_byte(0xFE, prescale)
-        self.write_byte(0x00, oldmode)
-        time.sleep(0.005)
-        self.write_byte(0x00, oldmode | 0x80)
+        newmode = (oldmode & 0x7F) | 0x10  # Set SLEEP bit (bit 4)
+        
+        self.write_byte(0x00, newmode)     # Go to sleep (required to set prescale)
+        self.write_byte(0xFE, prescale)    # Write prescale value
+        
+        # --- THE FIX IS HERE ---
+        # We must clear the SLEEP bit (bit 4) to wake it up
+        # We also usually want Auto-Increment (bit 5) enabled for multiple byte writes
+        self.write_byte(0x00, oldmode & 0xEF) # 0xEF = 11101111 (Clears bit 4)
+
+        time.sleep(0.005) # Wait for oscillator to stabilize
+
+        # Enable Restart (bit 7) and keep Sleep cleared
+        self.write_byte(0x00, (oldmode & 0xEF) | 0x80)
 
     def set_pwm(self, channel, on, off):
         """Sets the start (on) and end (off) tick for a specific channel."""
