@@ -65,7 +65,6 @@ class MissionController(Node):
         self.send_activation("apriltag_node", 1)
         self.send_activation("parking_controller", 0)
         self.send_activation("webcam_apriltag", 0)
-        self.send_activation("servo_controller", 0)
 
     def enter_search(self):
         """
@@ -79,7 +78,6 @@ class MissionController(Node):
         self.send_activation("apriltag_node", 1)
         self.send_activation("parking_controller", 0)
         self.send_activation("webcam_apriltag", 0)
-        self.send_activation("servo_controller", 0)
 
     def enter_align_front(self):
         """
@@ -96,7 +94,6 @@ class MissionController(Node):
         self.send_activation("apriltag_node", 1)
         self.send_activation("parking_controller", 0)
         self.send_activation("webcam_apriltag", 0)
-        self.send_activation("servo_controller", 0)
 
     def enter_turn_around(self):
         """
@@ -113,7 +110,6 @@ class MissionController(Node):
         self.send_activation("apriltag_node", 0)
         self.send_activation("webcam_apriltag", 1)
         self.send_activation("parking_controller", 1)
-        self.send_activation("servo_controller", 1)
 
     def enter_backup_park(self):
         """
@@ -130,7 +126,6 @@ class MissionController(Node):
         self.send_activation("apriltag_node", 0)
         self.send_activation("webcam_apriltag", 1)
         self.send_activation("parking_controller", 1)
-        self.send_activation("servo_controller", 1)
 
     def enter_drop_package(self):
         """
@@ -147,7 +142,6 @@ class MissionController(Node):
         self.send_activation("apriltag_node", 0)
         self.send_activation("webcam_apriltag", 1)
         self.send_activation("parking_controller", 0)
-        self.send_activation("servo_controller", 1)
 
     def enter_done(self):
         """
@@ -160,7 +154,6 @@ class MissionController(Node):
         self.send_activation("apriltag_node", 0)
         self.send_activation("webcam_apriltag", 0)
         self.send_activation("parking_controller", 0)
-        self.send_activation("servo_controller", 0)
 
     # ---------- Simple demo FSM: advance through states on a timer ----------
 

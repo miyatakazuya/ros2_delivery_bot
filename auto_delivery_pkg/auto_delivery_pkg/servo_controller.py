@@ -4,6 +4,7 @@ import rclpy
 from rclpy.node import Node
 from smbus2 import SMBus
 from std_msgs.msg import String
+from threading import Thread
 
 # ==========================================
 # PCA9685 Driver Class
@@ -75,25 +76,22 @@ class ServoController(Node):
     def __init__(self):
         super().__init__('servo_controller')
         
-        # NEW: acrivation flag + subscriber to /node_control
-        self.active = False
-        self.command_sub = self.create_subscription(
-            String,
-            'node_control',
-            self.command_callback,
-            10
-        )
-        
         # --- Parameters ---
         # Allow these to be configured via launch files or command line
         self.declare_parameter('i2c_bus', 1)
         self.declare_parameter('i2c_address', 0x40)
         self.declare_parameter('servo_channel', 0)
-        
+        self.declare_parameter('close_loc', 1950)
+        self.declare_parameter('open_loc', 1500)
+        self.declare_parameter('test', False)
+
         # Retrieve parameter values
         self.i2c_bus = self.get_parameter('i2c_bus').value
         self.i2c_address = self.get_parameter('i2c_address').value
         self.servo_channel = self.get_parameter('servo_channel').value
+        self.open_loc = self.get_parameter('open_loc').value
+        self.close_loc = self.get_parameter('close_loc').value
+        self.test_mode = self.get_parameter('test').value
 
         self.get_logger().info(f'Initializing PCA9685 on Bus {self.i2c_bus}, Addr {hex(self.i2c_address)}, Servo Ch {self.servo_channel}')
 
@@ -109,61 +107,46 @@ class ServoController(Node):
         except Exception as e:
             self.get_logger().error(f'Unexpected error connecting to PCA9685: {e}')
 
-        # --- Logic ---
-        # Timer to toggle servo position every 2 seconds
-        self.timer = self.create_timer(2.0, self.timer_callback)
-        self.is_open = False # State tracker
-        
-    # NEW: handle "servo_controller:1"/"servo_controller:0"
-    def command_callback(self, msg: String):
-        command = msg.data.strip()
-        try:
-            target, state = command.split(':')
-        except ValueError:
-            self.get_logger().warn(f"Malformed command: '{command}'")
-            return
+        # --- ROS Interfaces ---
+        self.subscription = self.create_subscription(
+            String,
+            '/servo',
+            self.command_callback,
+            10,
+        )
 
-        if target != 'servo_controller':
-            return
+        if self.test_mode:
+            Thread(target=self.run_startup_test, daemon=True).start()
 
-        if state not in ('0', '1'):
-            self.get_logger().warn(f"Unknown state '{state}' for servo_controller")
-            return
-
-        new_active = (state == '1')
-        if new_active != self.active:
-            self.active = new_active
-            self.get_logger().info(
-                f"Activation → {'ACTIVE' if self.active else 'IDLE'}"
-            )
-
-
-    def timer_callback(self):
-        # NEW: only run this loop when ACTIVE
-        if not self.active:
-            return
-        
+    def run_startup_test(self):
         if self.pca is None:
-            self.get_logger().warn('Hardware not connected, skipping control loop.')
+            self.get_logger().warn('Hardware not connected, skipping startup test sequence.')
             return
 
+        self.get_logger().info('Running startup servo test sequence')
+        self._move_servo(self.open_loc, 'OPEN (test)')
+        time.sleep(1)
+        self._move_servo(self.close_loc, 'CLOSE (test)')
+        time.sleep(1)
+        self._move_servo(self.close_loc, 'CLOSE (final)')
+
+    def command_callback(self, msg: String):
+        if self.pca is None:
+            self.get_logger().warn('Hardware not connected, cannot move servo.')
+            return
+
+        command = msg.data.strip().lower()
+        if command == 'open':
+            self._move_servo(self.open_loc, 'OPEN')
+        elif command == 'close':
+            self._move_servo(self.close_loc, 'CLOSE')
+        else:
+            self.get_logger().warn(f"Received unknown servo command: '{msg.data}' (expected 'open' or 'close')")
+
+    def _move_servo(self, target_pulse: int, status_text: str):
         try:
-            if self.is_open:
-                # Move to Closed Position (e.g., 1000us)
-                target_pulse = 1000
-                status_text = "CLOSED"
-            else:
-                # Move to Open Position (e.g., 2000us)
-                target_pulse = 2000
-                status_text = "OPEN"
-
             self.pca.set_servo_pulse(self.servo_channel, target_pulse)
-            
             self.get_logger().info(f'Servo Controller: Tray is {status_text} ({target_pulse}us)')
-            
-            # Toggle state for next run
-            self.is_open = not self.is_open
-
         except Exception as e:
             self.get_logger().error(f'Error writing to I2C bus: {e}')
 
