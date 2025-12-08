@@ -5,4 +5,5 @@ delivery_nodes:
   servo_controller: 0
   box_detection: 0
   apriltag_node: 0
-  apriltag_rear_node: 1
+  apriltag_rear_node: 0
+  apriltag_pose_node: 1

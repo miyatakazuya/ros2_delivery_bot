@@ -53,7 +53,8 @@ def generate_launch_description():
             executable='apriltag_rear_node',
             name='apriltag_rear_node',
             output='screen',
-            parameters=[vis_config_path] 
+            parameters=[vis_config_path],
+            parameters=[{'device_id': 1}] 
         ))
 
     if nodes_to_run.get('parking_controller', 1):
@@ -70,6 +71,14 @@ def generate_launch_description():
             executable='servo_controller',
             name='servo_controller',
             output='screen'
+        ))
+
+    if nodes_config.get('apriltag_pose_node', 1):
+        launch_actions.append(Node(
+            package='auto_delivery_pkg',
+            executable='apriltag_pose_node', # Matches setup.py entry point
+            name='apriltag_pose_node',
+            output='screen',
         ))
 
     return LaunchDescription(launch_actions)
