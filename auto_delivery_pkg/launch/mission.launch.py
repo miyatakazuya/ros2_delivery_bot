@@ -54,7 +54,6 @@ def generate_launch_description():
             name='apriltag_rear_node',
             output='screen',
             parameters=[vis_config_path],
-            parameters=[{'device_id': 1}] 
         ))
 
     if nodes_to_run.get('parking_controller', 1):
@@ -73,7 +72,7 @@ def generate_launch_description():
             output='screen'
         ))
 
-    if nodes_config.get('apriltag_pose_node', 1):
+    if nodes_to_run.get('apriltag_pose_node', 1):
         launch_actions.append(Node(
             package='auto_delivery_pkg',
             executable='apriltag_pose_node', # Matches setup.py entry point

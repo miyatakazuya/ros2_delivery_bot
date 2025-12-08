@@ -50,7 +50,7 @@ after the other `--volume()` flag.
 Add the following to `src/ucsd_robocar_hub2/ucsd_robocar_nav2_pkg/config/node_pkg_locations_ucsd.yaml`
 
 ```yaml
-delivery_system: ['auto_delivery_pkg', 'mission.launch.py']
+delivery_mission: ['auto_delivery_pkg', 'mission.launch.py']
 ```
 
 Add package as a config option in `src/ucsd_robocar_hub2/ucsd_robocar_nav2_pkg/config/node_config.yaml`
