@@ -6,20 +6,22 @@ from launch_ros.actions import Node
 
 def generate_launch_description():
     
-    # Load config
     pkg_share = get_package_share_directory('auto_delivery_pkg')
-    config_path = os.path.join(pkg_share, 'config', 'node_config.yaml')
+    
+    node_config_path = os.path.join(pkg_share, 'config', 'node_config.yaml')
     try:
-        with open(config_path, 'r') as f:
+        with open(node_config_path, 'r') as f:
             config = yaml.safe_load(f)
-            nodes_config = config['delivery_nodes']
-    except FileNotFoundError:
-        print(f"ERROR: Config file not found at {config_path}")
+            nodes_to_run = config['delivery_nodes']
+    except Exception as e:
+        print(f"ERROR loading node_config: {e}")
         return LaunchDescription()
+
+    vis_config_path = os.path.join(pkg_share, 'config', 'visualization.yaml')
 
     launch_actions = []
 
-    if nodes_config.get('mission_controller', 1):
+    if nodes_to_run.get('mission_controller', 1):
         launch_actions.append(Node(
             package='auto_delivery_pkg',
             executable='mission_controller',
@@ -27,7 +29,34 @@ def generate_launch_description():
             output='screen'
         ))
 
-    if nodes_config.get('parking_controller', 1):
+    if nodes_to_run.get('box_detection', False):
+        launch_actions.append(Node(
+            package='auto_delivery_pkg',
+            executable='oak_perception_node',
+            name='oak_perception_node',
+            output='screen',
+            parameters=[vis_config_path] 
+        ))
+    
+    if nodes_to_run.get('apriltag_node', False):
+        launch_actions.append(Node(
+            package='auto_delivery_pkg',
+            executable='apriltag_node',
+            name='apriltag_node',
+            output='screen',
+            parameters=[vis_config_path] 
+        ))
+
+    if nodes_to_run.get('apriltag_rear_node', False):
+        launch_actions.append(Node(
+            package='auto_delivery_pkg',
+            executable='apriltag_rear_node',
+            name='apriltag_rear_node',
+            output='screen',
+            parameters=[vis_config_path] 
+        ))
+
+    if nodes_to_run.get('parking_controller', 1):
         launch_actions.append(Node(
             package='auto_delivery_pkg',
             executable='parking_controller',
@@ -35,39 +64,12 @@ def generate_launch_description():
             output='screen'
         ))
 
-    if nodes_config.get('servo_controller', 1):
+    if nodes_to_run.get('servo_controller', 1):
         launch_actions.append(Node(
             package='auto_delivery_pkg',
             executable='servo_controller',
             name='servo_controller',
             output='screen'
-        ))
-
-    if nodes_config.get('box_detection', False):
-        launch_actions.append(Node(
-            package='auto_delivery_pkg',
-            executable='box_detection',
-            name='box_detection',
-            output='screen'
-        ))
-    
-    if nodes_config.get('apriltag_node', False):
-        launch_actions.append(Node(
-            package='auto_delivery_pkg',
-            executable='apriltag_node',
-            name='apriltag_node',
-            output='screen'
-        ))
-
-
-    if nodes_config.get('apriltag_rear_node', False):
-        launch_actions.append(Node(
-            package='auto_delivery_pkg',
-            executable='apriltag_rear_node', # Matches setup.py entry point
-            name='apriltag_rear_node',
-            output='screen',
-            # Add this line to select the correct camera index (e.g., 1 or 2)
-            parameters=[{'device_id': 1}] 
         ))
 
     return LaunchDescription(launch_actions)
