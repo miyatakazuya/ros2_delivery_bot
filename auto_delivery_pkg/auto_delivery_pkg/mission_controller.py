@@ -1,289 +1,184 @@
 import rclpy
 from rclpy.node import Node
 from std_msgs.msg import String
+from geometry_msgs.msg import Twist, PoseStamped
 from enum import Enum, auto
+import json
 import time
-from geometry_msgs.msg import Twist
-
 
 class MissionState(Enum):
     STARTUP = auto()
-    SEARCH = auto()
-    ALIGN_FRONT = auto()
-    TURN_AROUND = auto()
-    BACKUP_PARK = auto()
-    DROP_PACKAGE = auto()
+    SEARCH = auto()       
+    ALIGN_FRONT = auto()  
+    TURN_AROUND = auto()  
+    BACKUP_PARK = auto()  
     DONE = auto()
-
 
 class MissionController(Node):
     def __init__(self):
         super().__init__('mission_controller')
-
         self.state = MissionState.STARTUP
+        
+        # --- Publishers ---
+        self.node_control_pub = self.create_publisher(String, 'node_control', 10)
+        self.cmd_vel_pub = self.create_publisher(Twist, '/cmd_vel', 10)
 
-        # Publisher that sends "<node_name>:<0_or_1>" strings
-        self.node_control_pub = self.create_publisher(
-            String,
-            'node_control',
-            10
-        )
+        # --- Subscribers ---
+        self.create_subscription(String, '/perception/front/yolo_data', self.yolo_callback, 10)
+        self.create_subscription(PoseStamped, '/perception/front/tag_pose', self.front_tag_callback, 10)
+        self.create_subscription(PoseStamped, '/perception/rear/tag_pose', self.rear_tag_callback, 10)
 
-        # State machine tick (for now: advance every 4 seconds for testing)
-        self.timer = self.create_timer(4.0, self.state_step)
+        # --- State Variables ---
+        self.latest_front_tag = None
+        self.latest_rear_tag = None
+        self.last_tag_time = 0.0
+        
+        # Turn Timer
+        self.turn_start_time = 0.0
+        self.TURN_DURATION = 3.5 # TODO: still need to tune ts manually
 
-        self.get_logger().info("MissionController initialized in STARTUP state")
+        self.timer = self.create_timer(0.1, self.control_loop) # 10hz i think
+        self.get_logger().info("Mission Controller Initialized (Ackermann Logic).")
 
-        # On startup, set nodes according to the guide
-        self.enter_startup()
-
-    def send_activation(self, node_name: str, value: int) -> None:
-        """
-        Helper to publish ON/OFF commands.
-        value: 1 = activate, 0 = deactivate
-        """
+    def send_activation(self, node_name: str, value: int):
         msg = String()
         msg.data = f"{node_name}:{value}"
         self.node_control_pub.publish(msg)
-        # This line is where we actually command other nodes to toggle.
-        self.get_logger().info(f"[TOGGLE] {msg.data}")
 
-    # ---------- State entry helpers (match the node_activation_flow guide) ----------
+    def yolo_callback(self, msg):
+        # Yolo is ran here but we dont do anything with the results yet
+        self.get_logger().info(f"YOLO Seen: {msg.data}")
+        pass
 
-    def enter_startup(self):
-        """
-        STARTUP:
-          mission_controller: 1 (this node)
-          box_detection: 1
-          apriltag_node: 1
-          parking_controller: 0
-          webcam_apriltag: 0
-          servo_controller: 0
-        """
-        self.get_logger().info("[STATE] STARTUP → setting initial node activations")
-        self.send_activation("box_detection", 1)
-        self.send_activation("apriltag_node", 1)
-        self.send_activation("parking_controller", 0)
-        self.send_activation("webcam_apriltag", 0)
+    def front_tag_callback(self, msg):
+        self.latest_front_tag = msg.pose.position
+        self.last_tag_time = time.time()
 
-    def enter_search(self):
-        """
-        SEARCH:
-          Same activations as STARTUP, but now the robot is driving around
-          looking for the container (YOLO + front AprilTag).
-        """
-        self.get_logger().info("[STATE] SEARCH")
-        # No change needed if already in this configuration, but we set explicitly for clarity.
-        self.send_activation("box_detection", 1)
-        self.send_activation("apriltag_node", 1)
-        self.send_activation("parking_controller", 0)
-        self.send_activation("webcam_apriltag", 0)
+    def rear_tag_callback(self, msg):
+        self.latest_rear_tag = msg.pose.position
 
-    def enter_align_front(self):
-        """
-        ALIGN_FRONT:
-          mission_controller: 1
-          box_detection: 0 (turn off YOLO to save compute)
-          apriltag_node: 1 (use front AprilTag to align)
-          parking_controller: 0
-          webcam_apriltag: 0
-          servo_controller: 0
-        """
-        self.get_logger().info("[STATE] ALIGN_FRONT")
-        self.send_activation("box_detection", 0)
-        self.send_activation("apriltag_node", 1)
-        self.send_activation("parking_controller", 0)
-        self.send_activation("webcam_apriltag", 0)
-
-    def enter_turn_around(self):
-        """
-        TURN_AROUND:
-          mission_controller: 1
-          box_detection: 0
-          apriltag_node: 0
-          webcam_apriltag: 1 (rear AprilTag)
-          parking_controller: 1 (handle 180° maneuver)
-          servo_controller: 1 (ON but idle, ready for drop later)
-        """
-        self.get_logger().info("[STATE] TURN_AROUND")
-        self.send_activation("box_detection", 0)
-        self.send_activation("apriltag_node", 0)
-        self.send_activation("webcam_apriltag", 1)
-        self.send_activation("parking_controller", 1)
-
-    def enter_backup_park(self):
-        """
-        BACKUP_PARK:
-          mission_controller: 1
-          box_detection: 0
-          apriltag_node: 0
-          webcam_apriltag: 1
-          parking_controller: 1 (reverse towards container)
-          servo_controller: 1 (still ON, idle)
-        """
-        self.get_logger().info("[STATE] BACKUP_PARK")
-        self.send_activation("box_detection", 0)
-        self.send_activation("apriltag_node", 0)
-        self.send_activation("webcam_apriltag", 1)
-        self.send_activation("parking_controller", 1)
-
-    def enter_drop_package(self):
-        """
-        DROP_PACKAGE:
-          mission_controller: 1
-          box_detection: 0
-          apriltag_node: 0
-          webcam_apriltag: 1 (optional: keep ON monitoring)
-          parking_controller: 0 (no more motion)
-          servo_controller: 1 (actively tilting bed)
-        """
-        self.get_logger().info("[STATE] DROP_PACKAGE")
-        self.send_activation("box_detection", 0)
-        self.send_activation("apriltag_node", 0)
-        self.send_activation("webcam_apriltag", 1)
-        self.send_activation("parking_controller", 0)
-
-    def enter_done(self):
-        """
-        DONE:
-          mission_controller: 1
-          all other nodes: 0
-        """
-        self.get_logger().info("[STATE] DONE")
-        self.send_activation("box_detection", 0)
-        self.send_activation("apriltag_node", 0)
-        self.send_activation("webcam_apriltag", 0)
-        self.send_activation("parking_controller", 0)
-
-    # ---------- Simple demo FSM: advance through states on a timer ----------
-
-    def state_step(self) -> None:
-        """
-        For now this just auto-steps through the mission phases so you can
-        test all node toggles on your Mac without hardware.
-
-        Later you'll replace these transitions with real conditions
-        (e.g., "tag found", "aligned", "turn complete", "backed up", "drop done").
-        """
-        self.get_logger().info(f"[FSM] Current state: {self.state.name}")
-
-        if self.state == MissionState.STARTUP:
-            self.get_logger().info("Transition: STARTUP → SEARCH")
-            self.state = MissionState.SEARCH
-            self.enter_search()
-
-        elif self.state == MissionState.SEARCH:
-            self.get_logger().info("Transition: SEARCH → ALIGN_FRONT (pretend container found)")
-            self.state = MissionState.ALIGN_FRONT
-            self.enter_align_front()
-
-        elif self.state == MissionState.ALIGN_FRONT:
-            self.get_logger().info("Transition: ALIGN_FRONT → TURN_AROUND (pretend aligned)")
-            self.state = MissionState.TURN_AROUND
-            self.enter_turn_around()
-
-        elif self.state == MissionState.TURN_AROUND:
-            self.get_logger().info("Transition: TURN_AROUND → BACKUP_PARK (pretend 180° complete)")
-            self.state = MissionState.BACKUP_PARK
-            self.enter_backup_park()
-
-        elif self.state == MissionState.BACKUP_PARK:
-            self.get_logger().info("Transition: BACKUP_PARK → DROP_PACKAGE (pretend at drop position)")
-            self.state = MissionState.DROP_PACKAGE
-            self.enter_drop_package()
-
-        elif self.state == MissionState.DROP_PACKAGE:
-            self.get_logger().info("Transition: DROP_PACKAGE → DONE (pretend drop complete)")
-            self.state = MissionState.DONE
-            self.enter_done()
-
-        elif self.state == MissionState.DONE:
-            self.get_logger().info("FSM is in DONE state; no further transitions.")
-            # self.timer.cancel()  # optional: stop ticking
-            pass
-
-        self.publisher_ = self.create_publisher(Twist, '/cmd_vel', 10)
-        self.timer = self.create_timer(0.1, self.control_loop)
-        
-        # State variables
-        self.moving = True
-        self.counter = 0
-        self.switch_time = 30 
-        
-        # Safe Start Logic
-        self.start_delay = 100 # 100 ticks * 0.1s = 10 seconds
-        self.boot_counter = 0
-        self.is_initialized = False
-
-        self.get_logger().info('Mission Controller: Initialized (Waiting 10s warmup)')
-
+    # Main Control Loop
     def control_loop(self):
-        # 1. Warmup Phase (Non-blocking replacement for time.sleep)
-        if not self.is_initialized:
-            self.boot_counter += 1
-            if self.boot_counter % 10 == 0:
-                self.get_logger().info(f"Warming up... {self.boot_counter/10}s")
-            
-            if self.boot_counter >= self.start_delay:
-                self.is_initialized = True
-                self.get_logger().info("Warmup Complete. Starting Motion.")
-            return # Exit loop here, don't publish yet
-
-        # 2. Main Logic
-        msg = Twist()
+        cmd = Twist()
+        current_time = time.time()
         
-        if self.moving:
-            msg.linear.x = 0.5
-            msg.angular.z = -0.5
-            # Throttle logs to every 1 second (every 10 ticks)
-            if self.counter % 10 == 0: 
-                self.get_logger().info(f'Moving... ({self.counter}/{self.switch_time})')
-        else:
-            msg.linear.x = 0.0
-            msg.angular.z = 0.0
-            if self.counter % 10 == 0:
-                self.get_logger().info(f'Stopped... ({self.counter}/{self.switch_time})')
+        # Check if Front Tag is to avoid working off stale data
+        tag_is_visible = (self.latest_front_tag is not None) and \
+                         (current_time - self.last_tag_time < 0.5)
 
-        self.publisher_.publish(msg)
-        self.counter += 1
+        # =========================================================
+        # STATE 1: STARTUP
+        # =========================================================
+        if self.state == MissionState.STARTUP:
+            self.send_activation("oak_perception_node", 1) 
+            self.send_activation("apriltag_node", 1)
+            self.send_activation("webcam_apriltag", 0)
+            
+            self.get_logger().info("Startup Complete -> Switching to SEARCH")
+            self.state = MissionState.SEARCH
 
-        if self.counter >= self.switch_time:
-            self.moving = not self.moving
-            self.counter = 0
+        # =========================================================
+        # STATE 2: SEARCH (Scan & Approach)
+        # =========================================================
+        elif self.state == MissionState.SEARCH:
+            
+            if not tag_is_visible:
+                # TODO: this is in the case that the tag is not in the view of the car on startup.
+                # Not sure if turning in a circle until finding it makes total sense but will test (i think)
+                cmd.linear.x = 0.15  
+                cmd.angular.z = 0.6  
+            
+            else:               
+                error_x = self.latest_front_tag.x 
+                
+                k_p = 2.0 # TODO: tune this
+                cmd.angular.z = -k_p * error_x 
+                cmd.linear.x = 0.2 
+                
+                self.get_logger().info(f"Tracking Tag | Dist: {self.latest_front_tag.z:.2f}m")
 
-    # def control_loop(self):
-    #     self.get_logger().info(f'CURRENT STATE: [{self.state.name}]')
 
-    #     if self.state == MissionState.IDLE:
-    #         self.get_logger().info("Waiting for mission start...")
-    #         self.state = MissionState.SEARCHING
+                if self.latest_front_tag.z < 1.0: # 1 meter away
+                    self.get_logger().info("Close Range -> Switching to ALIGN_FRONT")
+                    self.state = MissionState.ALIGN_FRONT
 
-    #     elif self.state == MissionState.SEARCHING:
-    #         self.get_logger().info("Locating apriltagS")
-    #         self.state = MissionState.PARKING
+        # =========================================================
+        # STATE 3: ALIGN_FRONT (Precision)
+        # =========================================================
+        elif self.state == MissionState.ALIGN_FRONT:
+            # Again case if tag is somehow not visible.
+            if not tag_is_visible:
+                cmd.linear.x = 0.0
+                self.get_logger().warn("Tag Lost")
+            else:
+                error_x = self.latest_front_tag.x
+                cmd.linear.x = 0.1
+                cmd.angular.z = -3.0 * error_x 
+                
+                # Stop Logic 
+                if self.latest_front_tag.z < 0.6: # 0.6m 
+                    cmd.linear.x = 0.0
+                    self.get_logger().info("180 time")
+                    
+                    self.state = MissionState.TURN_AROUND
+                    self.turn_start_time = time.time()
+                    
+                    # Enable rear cam
+                    self.send_activation("webcam_apriltag", 1) 
+                    # self.send_activation("oak_perception_node", 0) 
 
-    #     elif self.state == MissionState.PARKING:
-    #         self.get_logger().info("Backing up")
-    #         self.state = MissionState.DELIVERING
+        # =========================================================
+        # STATE 4: TURN_AROUND (Blind 180)
+        # =========================================================
+        elif self.state == MissionState.TURN_AROUND:
+            elapsed = time.time() - self.turn_start_time
+            
+            if elapsed < self.TURN_DURATION:
+                cmd.linear.x = 0.3  
+                cmd.angular.z = 1.0 
+            else:
+                cmd.linear.x = 0.0
+                cmd.angular.z = 0.0
+                self.get_logger().info("Turn Complete. ")
+                self.state = MissionState.BACKUP_PARK
 
-    #     elif self.state == MissionState.DELIVERING:
-    #         self.get_logger().info("Dropping Package")
-    #         self.state = MissionState.RETURNING
+        # =========================================================
+        # STATE 5: BACKUP_PARK (Reverse Docking)
+        # =========================================================
+        elif self.state == MissionState.BACKUP_PARK:
+            
+            if self.latest_rear_tag:  
+                dist = self.latest_rear_tag.z # Distance behind robot
+                error_x = self.latest_rear_tag.x
+                
+                if dist < 0.2: # idk if the car can see anything after this
+                    cmd.linear.x = 0.0
+                    cmd.angular.z = 0.0
+                    self.get_logger().info("DOCKED!")   
+                    self.state = MissionState.DONE
 
-    #     elif self.state == MissionState.RETURNING:
-    #         self.get_logger().info("Mission Complete.")
+                    #TODO: Do servo stuff here
+                else:
+                    cmd.linear.x = -0.15 # Backing up speed 
+                    k_p_rear = 2.0
+                    cmd.angular.z = -k_p_rear * error_x 
+            
+            else:
+                # Tag not seen (skill issue)
+                cmd.linear.x = 0.0
+                self.get_logger().info("Searching for Rear Tag...")
+
+        # =========================================================
+        # FINAL: PUBLISH
+        # =========================================================
+        self.cmd_vel_pub.publish(cmd)
 
 def main(args=None):
     rclpy.init(args=args)
     node = MissionController()
-    try:
-        rclpy.spin(node)
-    except KeyboardInterrupt:
-        pass
-    finally:
-        node.destroy_node()
-        rclpy.shutdown()
-
+    rclpy.spin(node)
+    node.destroy_node()
+    rclpy.shutdown()
 
 if __name__ == '__main__':
     main()
