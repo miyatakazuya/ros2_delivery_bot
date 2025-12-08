@@ -1,0 +1,13 @@
+# auto_delivery_pkg/config/visualization.yaml
+
+oak_perception_node:
+  ros__parameters:
+    show_vis: false
+
+apriltag_node:
+  ros__parameters:
+    show_vis: false
+
+apriltag_rear_node:
+  ros__parameters:
+    show_vis: false  
