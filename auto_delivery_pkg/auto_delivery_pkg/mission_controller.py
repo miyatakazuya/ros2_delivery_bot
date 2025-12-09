@@ -37,6 +37,9 @@ class MissionController(Node):
         self.turn_start_time = 0.0
         self.TURN_DURATION = 3.5 # TODO: still need to tune ts manually
 
+        self.boot_time = time.time()
+        self.WARMUP_DURATION = 5.0 # Wait 5 seconds for OAK-D to stabilize
+
         self.timer = self.create_timer(0.1, self.control_loop) # 10hz i think
         self.get_logger().info("Mission Controller Initialized (Ackermann Logic).")
 
@@ -47,7 +50,7 @@ class MissionController(Node):
 
     def yolo_callback(self, msg):
         # Yolo is ran here but we dont do anything with the results yet
-        self.get_logger().info(f"YOLO Seen: {msg.data}")
+        # self.get_logger().info(f"YOLO Seen: {msg.data}")
         pass
 
     def front_tag_callback(self, msg):
@@ -70,9 +73,17 @@ class MissionController(Node):
         # STATE 1: STARTUP
         # =========================================================
         if self.state == MissionState.STARTUP:
-            self.send_activation("oak_perception_node", 1) 
-            self.send_activation("apriltag_node", 1)
-            self.send_activation("webcam_apriltag", 0)
+            elapsed = current_time - self.boot_time
+            if elapsed < self.WARMUP_DURATION:
+                self.get_logger().info(f"Warming up sensors... {int(self.WARMUP_DURATION - elapsed)}s", throttle_duration_sec=1.0)
+                self.send_activation("oak_perception_node", 1) 
+                self.send_activation("apriltag_node", 1)
+                self.send_activation("webcam_apriltag", 0)
+                return # EXIT LOOP (Don't move yet)
+
+            # self.send_activation("oak_perception_node", 1) 
+            # self.send_activation("apriltag_node", 1)
+            # self.send_activation("webcam_apriltag", 0)
             
             self.get_logger().info("Startup Complete -> Switching to SEARCH")
             self.state = MissionState.SEARCH
@@ -85,16 +96,17 @@ class MissionController(Node):
             if not tag_is_visible:
                 # TODO: this is in the case that the tag is not in the view of the car on startup.
                 # Not sure if turning in a circle until finding it makes total sense but will test (i think)
-                cmd.linear.x = 0.15  
-                cmd.angular.z = 0.6  
+                cmd.linear.x = 0.0  
+                cmd.angular.z = 0.0  
             
             else:               
                 error_x = self.latest_front_tag.x 
                 
-                k_p = 2.0 # TODO: tune this
-                cmd.angular.z = -k_p * error_x 
+                k_p = 0.5 # TODO: tune this
+                cmd.angular.z = k_p * error_x 
                 cmd.linear.x = 0.2 
                 
+                self.get_logger().info(f"Error: {error_x:.2f}")
                 self.get_logger().info(f"Tracking Tag | Dist: {self.latest_front_tag.z:.2f}m")
 
 
@@ -112,8 +124,8 @@ class MissionController(Node):
                 self.get_logger().warn("Tag Lost")
             else:
                 error_x = self.latest_front_tag.x
-                cmd.linear.x = 0.1
-                cmd.angular.z = -3.0 * error_x 
+                cmd.linear.x = 0.15
+                cmd.angular.z = 0.3 * error_x 
                 
                 # Stop Logic 
                 if self.latest_front_tag.z < 0.6: # 0.6m 
@@ -134,13 +146,13 @@ class MissionController(Node):
             elapsed = time.time() - self.turn_start_time
             
             if elapsed < self.TURN_DURATION:
-                cmd.linear.x = 0.3  
+                cmd.linear.x = 0.5  
                 cmd.angular.z = 1.0 
             else:
                 cmd.linear.x = 0.0
                 cmd.angular.z = 0.0
                 self.get_logger().info("Turn Complete. ")
-                self.state = MissionState.BACKUP_PARK
+#                self.state = MissionState.BACKUP_PARK
 
         # =========================================================
         # STATE 5: BACKUP_PARK (Reverse Docking)
