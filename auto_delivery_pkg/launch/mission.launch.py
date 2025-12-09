@@ -29,6 +29,13 @@ def generate_launch_description():
             output='screen'
         ))
 
+        launch_actions.append(Node(
+            package='auto_delivery_pkg',
+            executable='motion_controller',
+            name='motion_controller',
+            output='screen'
+        ))
+
     if nodes_to_run.get('box_detection', False):
         launch_actions.append(Node(
             package='auto_delivery_pkg',
@@ -70,14 +77,6 @@ def generate_launch_description():
             executable='servo_controller',
             name='servo_controller',
             output='screen'
-        ))
-
-    if nodes_to_run.get('apriltag_pose_node', 1):
-        launch_actions.append(Node(
-            package='auto_delivery_pkg',
-            executable='apriltag_pose_node', # Matches setup.py entry point
-            name='apriltag_pose_node',
-            output='screen',
         ))
 
     return LaunchDescription(launch_actions)
