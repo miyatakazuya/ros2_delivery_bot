@@ -20,10 +20,10 @@ class MotionController(Node):
         self.last_front_time = 0.0
         self.last_rear_time = 0.0
         
-        # Tuning Gains
-        self.KP_SEARCH = 0.3
-        self.KP_ALIGN = 0.3
-        self.KP_REVERSE = 2.0
+        # Gains
+        self.KP_SEARCH = 0.5
+        self.KP_ALIGN = 0.5
+        self.KP_REVERSE = 2.5
 
         self.timer = self.create_timer(0.02, self.control_loop) # 50Hz
         self.get_logger().info("Motion Controller Initialized.")
@@ -43,25 +43,15 @@ class MotionController(Node):
         cmd = Twist()
         current_time = time.time()
         
-        # --- DATA FRESHNESS SETTINGS ---
-        # Front OAK-D is fast (30Hz+), so 0.5s is generous but safe.
-        front_timeout = 0.5 
-        # Rear USB Webcam is SLOW/Laggy. 
-        # We allow "holding" the command for up to 1.0 second to bridge the gap between frames.
-        rear_timeout = 1.0 
+        front_fresh = (current_time - self.last_front_time) < 0.5
+        rear_fresh = (current_time - self.last_rear_time) < 1.0 
 
-        front_fresh = (current_time - self.last_front_time) < front_timeout
-        rear_fresh = (current_time - self.last_rear_time) < rear_timeout
-
-        # --- STATE: STARTUP / WAIT / DONE ---
         if self.current_state in ["STARTUP", "WAIT_FOR_START", "TURN_BUFFER", "DONE"]:
             cmd.linear.x = 0.0
             cmd.angular.z = 0.0
 
-        # --- STATE: SEARCH ---
         elif self.current_state == "SEARCH":
             if not front_fresh:
-                # If truly lost for >0.5s, stop to be safe
                 cmd.linear.x = 0.0
                 cmd.angular.z = 0.0
             else:
@@ -69,7 +59,6 @@ class MotionController(Node):
                 cmd.linear.x = 0.2
                 cmd.angular.z = self.KP_SEARCH * err_x 
 
-        # --- STATE: ALIGN_FRONT ---
         elif self.current_state == "ALIGN_FRONT":
             if front_fresh:
                 err_x = self.front_tag.x
@@ -78,7 +67,6 @@ class MotionController(Node):
             else:
                 cmd.linear.x = 0.0
 
-        # --- STATE: TURNS ---
         elif self.current_state == "TURN_PART_1":
             cmd.linear.x = -0.3 
             cmd.angular.z = -1.0 
@@ -87,20 +75,18 @@ class MotionController(Node):
             cmd.linear.x = 0.3
             cmd.angular.z = 1.0 
 
-        # --- STATE: BACKUP_PARK (The Fix) ---
         elif self.current_state == "BACKUP_PARK":
-            # We use the permissive 'rear_fresh' (1.0s) check here
             if self.rear_tag and rear_fresh:
                 err_x = self.rear_tag.x
                 cmd.linear.x = -0.15
                 cmd.angular.z = -self.KP_REVERSE * err_x 
             else:
-                # Only STOP if data is OLDER than 1.0s
-                # This bridges the gaps between slow webcam frames
-                if self.rear_tag: 
-                    self.get_logger().warn(f"Rear Cam Lagging! Last seen: {current_time - self.last_rear_time:.2f}s ago")
                 cmd.linear.x = 0.0
-                cmd.angular.z = 0.0
+
+        elif self.current_state == "BLIND_DOCK":
+            # NEW: Drive straight back
+            cmd.linear.x = -0.15
+            cmd.angular.z = 0.0
 
         self.cmd_vel_pub.publish(cmd)
 
