@@ -1,17 +1,20 @@
 import rclpy
 from rclpy.node import Node
-from std_msgs.msg import String
-from geometry_msgs.msg import Twist, PoseStamped
+from std_msgs.msg import String, Empty
+from geometry_msgs.msg import PoseStamped
 from enum import Enum, auto
-import json
 import time
 
 class MissionState(Enum):
     STARTUP = auto()
+    WAIT_FOR_START = auto()
     SEARCH = auto()       
     ALIGN_FRONT = auto()  
-    TURN_AROUND = auto()  
-    BACKUP_PARK = auto()  
+    TURN_PART_1 = auto()  
+    TURN_PART_2 = auto() 
+    TURN_BUFFER = auto()
+    BACKUP_PARK = auto()  # Visual Servoing (PID)
+    BLIND_DOCK = auto()   # NEW: Dead Reckoning (Time-based)
     DONE = auto()
 
 class MissionController(Node):
@@ -20,170 +23,121 @@ class MissionController(Node):
         self.state = MissionState.STARTUP
         
         # --- Publishers ---
+        self.state_pub = self.create_publisher(String, '/mission/state', 10)
         self.node_control_pub = self.create_publisher(String, 'node_control', 10)
-        self.cmd_vel_pub = self.create_publisher(Twist, '/cmd_vel', 10)
+        self.servo_pub = self.create_publisher(String, '/servo', 10)
 
         # --- Subscribers ---
-        self.create_subscription(String, '/perception/front/yolo_data', self.yolo_callback, 10)
         self.create_subscription(PoseStamped, '/perception/front/tag_pose', self.front_tag_callback, 10)
         self.create_subscription(PoseStamped, '/perception/rear/tag_pose', self.rear_tag_callback, 10)
+        self.create_subscription(Empty, '/mission/start', self.start_callback, 10)
 
-        # --- State Variables ---
-        self.latest_front_tag = None
-        self.latest_rear_tag = None
-        self.last_tag_time = 0.0
+        self.latest_front_dist = None
+        self.latest_rear_dist = None
         
-        # Turn Timer
-        self.turn_start_time = 0.0
-        self.TURN_DURATION = 3.5 # TODO: still need to tune ts manually
-
         self.boot_time = time.time()
-        self.WARMUP_DURATION = 5.0 # Wait 5 seconds for OAK-D to stabilize
+        self.state_start_time = 0.0
+        
+        # --- TUNING TIMERS ---
+        self.WARMUP_DURATION = 3.0
+        self.TURN_LEG_DURATION = 1.5 
+        self.TURN_OFFSET = 0.4 
+        self.BUFFER_DURATION = 3.0 
+        
+        # NEW: Blind Docking Params
+        self.HANDOVER_DIST = 0.3 # Switch from PID to Blind at 15cm
+        self.BLIND_DURATION = 0.1 # Drive back for 1.5s to cover the last bit
 
-        self.timer = self.create_timer(0.1, self.control_loop) # 10hz i think
-        self.get_logger().info("Mission Controller Initialized (Ackermann Logic).")
+        self.timer = self.create_timer(0.1, self.state_loop)
+        self.get_logger().info("Mission Controller Initialized.")
 
     def send_activation(self, node_name: str, value: int):
         msg = String()
         msg.data = f"{node_name}:{value}"
         self.node_control_pub.publish(msg)
 
-    def yolo_callback(self, msg):
-        # Yolo is ran here but we dont do anything with the results yet
-        # self.get_logger().info(f"YOLO Seen: {msg.data}")
-        pass
+    def trigger_servo(self, command: str):
+        msg = String()
+        msg.data = command
+        self.servo_pub.publish(msg)
+        self.get_logger().info(f"Servo Command Sent: {command}")
 
     def front_tag_callback(self, msg):
-        self.latest_front_tag = msg.pose.position
-        self.last_tag_time = time.time()
+        self.latest_front_dist = msg.pose.position.z
 
     def rear_tag_callback(self, msg):
-        self.latest_rear_tag = msg.pose.position
+        self.latest_rear_dist = msg.pose.position.z
 
-    # Main Control Loop
-    def control_loop(self):
-        cmd = Twist()
+    def start_callback(self, msg):
+        if self.state == MissionState.WAIT_FOR_START:
+            self.get_logger().info("Start Signal Received! -> SEARCH")
+            self.state = MissionState.SEARCH
+
+    def state_loop(self):
         current_time = time.time()
         
-        # Check if Front Tag is to avoid working off stale data
-        tag_is_visible = (self.latest_front_tag is not None) and \
-                         (current_time - self.last_tag_time < 0.5)
-
-        # =========================================================
-        # STATE 1: STARTUP
-        # =========================================================
         if self.state == MissionState.STARTUP:
-            elapsed = current_time - self.boot_time
-            if elapsed < self.WARMUP_DURATION:
-                self.get_logger().info(f"Warming up sensors... {int(self.WARMUP_DURATION - elapsed)}s", throttle_duration_sec=1.0)
+            self.trigger_servo("close")
+            if (current_time - self.boot_time) > self.WARMUP_DURATION:
+                self.get_logger().info("Warmup Done. Waiting for Start Signal...")
+                
                 self.send_activation("oak_perception_node", 1) 
                 self.send_activation("apriltag_node", 1)
                 self.send_activation("webcam_apriltag", 0)
-                return # EXIT LOOP (Don't move yet)
+                self.state = MissionState.WAIT_FOR_START
 
-            # self.send_activation("oak_perception_node", 1) 
-            # self.send_activation("apriltag_node", 1)
-            # self.send_activation("webcam_apriltag", 0)
-            
-            self.get_logger().info("Startup Complete -> Switching to SEARCH")
+        elif self.state == MissionState.WAIT_FOR_START:
             self.state = MissionState.SEARCH
+            pass
 
-        # =========================================================
-        # STATE 2: SEARCH (Scan & Approach)
-        # =========================================================
         elif self.state == MissionState.SEARCH:
-            
-            if not tag_is_visible:
-                # TODO: this is in the case that the tag is not in the view of the car on startup.
-                # Not sure if turning in a circle until finding it makes total sense but will test (i think)
-                cmd.linear.x = 0.0  
-                cmd.angular.z = 0.0  
-            
-            else:               
-                error_x = self.latest_front_tag.x 
-                
-                k_p = 0.5 # TODO: tune this
-                cmd.angular.z = k_p * error_x 
-                cmd.linear.x = 0.2 
-                
-                self.get_logger().info(f"Error: {error_x:.2f}")
-                self.get_logger().info(f"Tracking Tag | Dist: {self.latest_front_tag.z:.2f}m")
+            if self.latest_front_dist and self.latest_front_dist < 1.0:
+                self.get_logger().info("Target Locked -> ALIGN_FRONT")
+                self.state = MissionState.ALIGN_FRONT
 
-
-                if self.latest_front_tag.z < 1.0: # 1 meter away
-                    self.get_logger().info("Close Range -> Switching to ALIGN_FRONT")
-                    self.state = MissionState.ALIGN_FRONT
-
-        # =========================================================
-        # STATE 3: ALIGN_FRONT (Precision)
-        # =========================================================
         elif self.state == MissionState.ALIGN_FRONT:
-            # Again case if tag is somehow not visible.
-            if not tag_is_visible:
-                cmd.linear.x = 0.0
-                self.get_logger().warn("Tag Lost")
-            else:
-                error_x = self.latest_front_tag.x
-                cmd.linear.x = 0.15
-                cmd.angular.z = 0.3 * error_x 
-                
-                # Stop Logic 
-                if self.latest_front_tag.z < 0.6: # 0.6m 
-                    cmd.linear.x = 0.0
-                    self.get_logger().info("180 time")
-                    
-                    self.state = MissionState.TURN_AROUND
-                    self.turn_start_time = time.time()
-                    
-                    # Enable rear cam
-                    self.send_activation("webcam_apriltag", 1) 
-                    # self.send_activation("oak_perception_node", 0) 
+            if self.latest_front_dist and self.latest_front_dist < 0.6:
+                self.get_logger().info("Aligned -> STARTING 180 TURN (Leg 1)")
+                self.state = MissionState.TURN_PART_1
+                self.state_start_time = time.time()
 
-        # =========================================================
-        # STATE 4: TURN_AROUND (Blind 180)
-        # =========================================================
-        elif self.state == MissionState.TURN_AROUND:
-            elapsed = time.time() - self.turn_start_time
-            
-            if elapsed < self.TURN_DURATION:
-                cmd.linear.x = 0.5  
-                cmd.angular.z = 1.0 
-            else:
-                cmd.linear.x = 0.0
-                cmd.angular.z = 0.0
-                self.get_logger().info("Turn Complete. ")
-#                self.state = MissionState.BACKUP_PARK
+        elif self.state == MissionState.TURN_PART_1:
+            if (current_time - self.state_start_time) > self.TURN_LEG_DURATION:
+                self.get_logger().info("Leg 1 Done -> STARTING Leg 2")
+                self.state = MissionState.TURN_PART_2
+                self.state_start_time = time.time() 
 
-        # =========================================================
-        # STATE 5: BACKUP_PARK (Reverse Docking)
-        # =========================================================
+        elif self.state == MissionState.TURN_PART_2:
+            if (current_time - self.state_start_time) > (self.TURN_LEG_DURATION + self.TURN_OFFSET):
+                self.get_logger().info("Turn Complete -> BUFFER (Wake Rear Cam)")
+                self.state = MissionState.TURN_BUFFER
+                self.state_start_time = time.time()
+                self.send_activation("webcam_apriltag", 1) 
+
+        elif self.state == MissionState.TURN_BUFFER:
+            if (current_time - self.state_start_time) > self.BUFFER_DURATION:
+                self.get_logger().info("Buffer Done -> BACKUP_PARK")
+                self.state = MissionState.BACKUP_PARK
+
         elif self.state == MissionState.BACKUP_PARK:
-            
-            if self.latest_rear_tag:  
-                dist = self.latest_rear_tag.z # Distance behind robot
-                error_x = self.latest_rear_tag.x
-                
-                if dist < 0.2: # idk if the car can see anything after this
-                    cmd.linear.x = 0.0
-                    cmd.angular.z = 0.0
-                    self.get_logger().info("DOCKED!")   
-                    self.state = MissionState.DONE
+            # Use PID until we get close (0.15m)
+            self.get_logger().info(f"rear_dist ({self.latest_rear_dist}m)")
 
-                    #TODO: Do servo stuff here
-                else:
-                    cmd.linear.x = -0.15 # Backing up speed 
-                    k_p_rear = 2.0
-                    cmd.angular.z = -k_p_rear * error_x 
-            
-            else:
-                # Tag not seen (skill issue)
-                cmd.linear.x = 0.0
-                self.get_logger().info("Searching for Rear Tag...")
+            if self.latest_rear_dist and self.latest_rear_dist < self.HANDOVER_DIST:
+                self.get_logger().info(f"Close ({self.latest_rear_dist:.2f}m) -> BLIND DOCKING")
+                self.state = MissionState.BLIND_DOCK
+                self.state_start_time = time.time()
 
-        # =========================================================
-        # FINAL: PUBLISH
-        # =========================================================
-        self.cmd_vel_pub.publish(cmd)
+        elif self.state == MissionState.BLIND_DOCK:
+            # Drive blind for set duration
+            if (current_time - self.state_start_time) > self.BLIND_DURATION:
+                self.get_logger().info("Blind Dock Complete -> DROPPING")
+                self.trigger_servo("open")
+                self.state = MissionState.DONE
+
+        msg = String()
+        msg.data = self.state.name 
+        self.state_pub.publish(msg)
 
 def main(args=None):
     rclpy.init(args=args)

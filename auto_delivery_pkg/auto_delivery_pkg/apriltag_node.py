@@ -12,7 +12,7 @@ import math
 class FrontAprilTagNode(Node):
     def __init__(self):
         super().__init__('apriltag_node')
-        self.get_logger().info('--- Front AprilTag Node (Calibrated) Started ---')
+        self.get_logger().info('--- Front AprilTag Node Started ---')
 
         self.declare_parameter('show_vis', True)
         self.show_vis = self.get_parameter('show_vis').value
@@ -25,8 +25,9 @@ class FrontAprilTagNode(Node):
         self.pose_pub = self.create_publisher(PoseStamped, '/perception/front/tag_pose', 10)
         self.debug_pub = self.create_publisher(Image, '/camera/front/debug_apriltag', 10)
 
-        # --- CALIBRATION DATA (From your update) ---
-        self.tag_size = 0.06 # Note: Check if this is really 6cm. Standard paper tags are often 0.165m
+        # --- CALIBRATION & CONFIG ---
+        # FIX 1: Scaled Tag Size (Real 0.06 * (2.0m Real / 1.0m Measured))
+        self.tag_size = 0.12 
         
         self.K = np.array([
             [707.5638, 0.0,      305.7333],
@@ -35,15 +36,20 @@ class FrontAprilTagNode(Node):
         ])
         self.D = np.array([0.2177, -1.5959, -0.0551, -0.0037, 4.6383])
         
-        # [fx, fy, cx, cy]
-        self.camera_params = [707.5638, 724.9585, 305.7333, 170.5174]
-
         self.detector = Detector(families='tag36h11', nthreads=1, quad_decimate=1.0)
 
     def command_callback(self, msg: String):
         data = msg.data.strip().split(':')
         if len(data) == 2 and data[0] == 'apriltag_node':
             self.active = (data[1] == '1')
+
+    def get_yaw_from_R(self, R):
+        # Extract Yaw (Rotation around Y-axis in Camera Frame)
+        # Camera Frame: X=Right, Y=Down, Z=Forward
+        # Tag Frame:    X=Right, Y=Down, Z=Out of Tag
+        # A rotation of the tag around its vertical axis corresponds to R[0,2] and R[2,2]
+        yaw = math.atan2(R[0, 2], R[2, 2])
+        return np.degrees(yaw)
 
     def image_callback(self, msg):
         if not self.active: return
@@ -52,17 +58,24 @@ class FrontAprilTagNode(Node):
             raw_frame = self.bridge.imgmsg_to_cv2(msg, "bgr8")
         except: return
 
-        # 1. UNDISTORT
+        # 1. UNDISTORT & GET NEW CAM MATRIX
         h, w = raw_frame.shape[:2]
         newcameramtx, roi = cv2.getOptimalNewCameraMatrix(self.K, self.D, (w,h), 1, (w,h))
         frame = cv2.undistort(raw_frame, self.K, self.D, None, newcameramtx)
+
+        # FIX 2: Extract NEW intrinsics for the detector
+        fx = newcameramtx[0, 0]
+        fy = newcameramtx[1, 1]
+        cx = newcameramtx[0, 2]
+        cy = newcameramtx[1, 2]
+        current_params = [fx, fy, cx, cy]
 
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         
         detections = self.detector.detect(
             gray, 
             estimate_tag_pose=True, 
-            camera_params=self.camera_params, 
+            camera_params=current_params, # Use the undistorted params
             tag_size=self.tag_size
         )
 
@@ -78,16 +91,25 @@ class FrontAprilTagNode(Node):
             
             self.pose_pub.publish(pose_msg)
 
-            # Debug
+            # Calculate Yaw for Debug
+            yaw = self.get_yaw_from_R(det.pose_R)
+
+            # Debug Drawing
             if self.show_vis:
                 corners = np.array(det.corners, dtype=np.int32).reshape((-1, 1, 2))
                 cv2.polylines(frame, [corners], True, (0, 255, 0), 2)
-                cv2.circle(frame, (int(det.center[0]), int(det.center[1])), 5, (0, 0, 255), -1)
-                cv2.putText(frame, f"Z: {det.pose_t[2][0]:.2f}m", (int(det.center[0]), int(det.center[1])-10), 
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0,255,0), 2)
+                
+                # Draw Center
+                cx_det, cy_det = int(det.center[0]), int(det.center[1])
+                cv2.circle(frame, (cx_det, cy_det), 5, (0, 0, 255), -1)
+                
+                # Info Text
+                label = f"Dist: {det.pose_t[2][0]:.2f}m | Yaw: {yaw:.0f}"
+                cv2.putText(frame, label, (cx_det - 50, cy_det - 15), 
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 2)
 
         if self.show_vis:
-            cv2.imshow("Front AprilTag (Calibrated)", frame)
+            cv2.imshow("Front AprilTag", frame)
             cv2.waitKey(1)
             
         self.debug_pub.publish(self.bridge.cv2_to_imgmsg(frame, encoding="bgr8"))
