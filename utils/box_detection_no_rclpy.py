@@ -12,7 +12,7 @@ class BoxDetection:
         self.label_map = ["Clear Box", "Red Box", "red box"]
         self.input_size = 640 
         
-        self.blob_path = "../models/yolov8_n.blob" 
+        self.blob_path = "yolov8_n.blob" 
 
         if not os.path.exists(self.blob_path):
             print(f"ERROR: Blob not found at: {os.path.abspath(self.blob_path)}")

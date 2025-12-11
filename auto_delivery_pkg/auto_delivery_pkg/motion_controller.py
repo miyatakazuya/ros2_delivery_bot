@@ -21,9 +21,9 @@ class MotionController(Node):
         self.last_rear_time = 0.0
         
         # Gains
-        self.KP_SEARCH = 0.5
-        self.KP_ALIGN = 0.5
-        self.KP_REVERSE = 2.5
+        self.KP_SEARCH = 0.6
+        self.KP_ALIGN = 0.6
+        self.KP_REVERSE = 2.0
 
         self.timer = self.create_timer(0.02, self.control_loop) # 50Hz
         self.get_logger().info("Motion Controller Initialized.")

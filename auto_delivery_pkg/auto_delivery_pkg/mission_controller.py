@@ -50,7 +50,7 @@ class MissionController(Node):
         self.BUFFER_DURATION = 3.0 
         
         # NEW: Blind Docking Params
-        self.HANDOVER_DIST = 0.3 # Switch from PID to Blind at 15cm
+        self.HANDOVER_DIST = 0.35 # Switch from PID to Blind at 15cm
         self.BLIND_DURATION = 0.1 # Drive back for 1.5s to cover the last bit
 
         self.timer = self.create_timer(0.1, self.state_loop)
@@ -113,10 +113,9 @@ class MissionController(Node):
 
         if self.state == MissionState.STARTUP:
             self.trigger_servo("close")
+            self.send_activation("oak_perception_node", 1) 
             if (current_time - self.boot_time) > self.WARMUP_DURATION:
                 self.get_logger().info("Warmup Done. Waiting for Start Signal...")
-                
-                self.send_activation("oak_perception_node", 1) 
                 self.send_activation("apriltag_node", 1)
                 self.send_activation("webcam_apriltag", 0)
                 self.state = MissionState.WAIT_FOR_START
@@ -124,7 +123,7 @@ class MissionController(Node):
         elif self.state == MissionState.WAIT_FOR_START:
             # NOTE: right now this auto-starts into SEARCH;
             # start_callback will also move it, but this keeps your behavior.
-            self.state = MissionState.SEARCH
+            # self.state = MissionState.SEARCH
             pass
 
         elif self.state == MissionState.SEARCH:

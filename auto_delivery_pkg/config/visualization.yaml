@@ -6,7 +6,7 @@ oak_perception_node:
 
 apriltag_node:
   ros__parameters:
-    show_vis: false
+    show_vis: true
 
 apriltag_rear_node:
   ros__parameters:
