@@ -30,7 +30,6 @@ setup(
             'oak_perception_node = auto_delivery_pkg.oak_perception_node:main', # Renamed
             'apriltag_node = auto_delivery_pkg.apriltag_node:main',
             'apriltag_rear_node = auto_delivery_pkg.webcam_apriltag:main',
-            'parking_controller = auto_delivery_pkg.parking_controller:main',
             'servo_controller = auto_delivery_pkg.servo_controller:main',
             'motion_controller = auto_delivery_pkg.motion_controller:main'
         ],

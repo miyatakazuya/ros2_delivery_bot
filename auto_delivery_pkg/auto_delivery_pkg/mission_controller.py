@@ -4,7 +4,7 @@ from std_msgs.msg import String, Empty
 from geometry_msgs.msg import PoseStamped
 from enum import Enum, auto
 import time
-import json  # <-- NEW
+import json  
 
 class MissionState(Enum):
     STARTUP = auto()
@@ -14,8 +14,8 @@ class MissionState(Enum):
     TURN_PART_1 = auto()  
     TURN_PART_2 = auto() 
     TURN_BUFFER = auto()
-    BACKUP_PARK = auto()  # Visual Servoing (PID)
-    BLIND_DOCK = auto()   # NEW: Dead Reckoning (Time-based)
+    BACKUP_PARK = auto()  
+    BLIND_DOCK = auto()   
     DONE = auto()
 
 class MissionController(Node):
@@ -37,7 +37,6 @@ class MissionController(Node):
         self.latest_front_dist = None
         self.latest_rear_dist = None
 
-        # NEW: flag for container already filled
         self.container_filled = False
         
         self.boot_time = time.time()
@@ -49,9 +48,8 @@ class MissionController(Node):
         self.TURN_OFFSET = 0.4 
         self.BUFFER_DURATION = 3.0 
         
-        # NEW: Blind Docking Params
-        self.HANDOVER_DIST = 0.35 # Switch from PID to Blind at 15cm
-        self.BLIND_DURATION = 0.1 # Drive back for 1.5s to cover the last bit
+        self.HANDOVER_DIST = 0.35 
+        self.BLIND_DURATION = 0.1 
 
         self.timer = self.create_timer(0.1, self.state_loop)
         self.get_logger().info("Mission Controller Initialized.")
@@ -90,10 +88,9 @@ class MissionController(Node):
         try:
             detections = json.loads(msg.data)
         except json.JSONDecodeError:
-            self.get_logger().warn("Failed to parse YOLO JSON from /perception/front/yolo_data")
+            self.get_logger().warn("Failed to parse YOLO JSON")
             return
 
-        # Labels that mean "container already filled"
         FILLED_LABELS = {"Red Box", "red box"}
 
         for det in detections:
@@ -106,7 +103,6 @@ class MissionController(Node):
     def state_loop(self):
         current_time = time.time()
 
-        # --- GLOBAL ABORT: if container already filled, force DONE and stop progressing ---
         if self.container_filled and self.state != MissionState.DONE:
             self.get_logger().info("Container already filled. Aborting mission and setting state to DONE.")
             self.state = MissionState.DONE
@@ -121,8 +117,7 @@ class MissionController(Node):
                 self.state = MissionState.WAIT_FOR_START
 
         elif self.state == MissionState.WAIT_FOR_START:
-            # NOTE: right now this auto-starts into SEARCH;
-            # start_callback will also move it, but this keeps your behavior.
+            # Uncomment this if u don't want the mission to halt on startup
             # self.state = MissionState.SEARCH
             pass
 
@@ -130,7 +125,6 @@ class MissionController(Node):
             if self.latest_front_dist and self.latest_front_dist < 1.0:
                 self.get_logger().info("Target Locked -> ALIGN_FRONT")
                 self.state = MissionState.ALIGN_FRONT
-            # Removed incomplete "if yolo_msg ==" here
 
         elif self.state == MissionState.ALIGN_FRONT:
             if self.latest_front_dist and self.latest_front_dist < 0.6:
@@ -158,7 +152,6 @@ class MissionController(Node):
                 self.state = MissionState.BACKUP_PARK
 
         elif self.state == MissionState.BACKUP_PARK:
-            # Use PID until we get close (0.15m)
             self.get_logger().info(f"rear_dist ({self.latest_rear_dist}m)")
 
             if self.latest_rear_dist and self.latest_rear_dist < self.HANDOVER_DIST:
@@ -167,13 +160,11 @@ class MissionController(Node):
                 self.state_start_time = time.time()
 
         elif self.state == MissionState.BLIND_DOCK:
-            # Drive blind for set duration
             if (current_time - self.state_start_time) > self.BLIND_DURATION:
                 self.get_logger().info("Blind Dock Complete -> DROPPING")
                 self.trigger_servo("open")
                 self.state = MissionState.DONE
 
-        # In DONE: no extra transitions; just publish the state
         msg = String()
         msg.data = self.state.name 
         self.state_pub.publish(msg)

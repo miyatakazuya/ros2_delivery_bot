@@ -63,14 +63,6 @@ def generate_launch_description():
             parameters=[vis_config_path],
         ))
 
-    if nodes_to_run.get('parking_controller', 1):
-        launch_actions.append(Node(
-            package='auto_delivery_pkg',
-            executable='parking_controller',
-            name='parking_controller',
-            output='screen'
-        ))
-
     if nodes_to_run.get('servo_controller', 1):
         launch_actions.append(Node(
             package='auto_delivery_pkg',

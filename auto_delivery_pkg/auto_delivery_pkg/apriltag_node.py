@@ -26,7 +26,6 @@ class FrontAprilTagNode(Node):
         self.debug_pub = self.create_publisher(Image, '/camera/front/debug_apriltag', 10)
 
         # --- CALIBRATION & CONFIG ---
-        # FIX 1: Scaled Tag Size (Real 0.06 * (2.0m Real / 1.0m Measured))
         self.tag_size = 0.12 
         
         self.K = np.array([
@@ -58,12 +57,10 @@ class FrontAprilTagNode(Node):
             raw_frame = self.bridge.imgmsg_to_cv2(msg, "bgr8")
         except: return
 
-        # 1. UNDISTORT & GET NEW CAM MATRIX
         h, w = raw_frame.shape[:2]
         newcameramtx, roi = cv2.getOptimalNewCameraMatrix(self.K, self.D, (w,h), 1, (w,h))
         frame = cv2.undistort(raw_frame, self.K, self.D, None, newcameramtx)
 
-        # FIX 2: Extract NEW intrinsics for the detector
         fx = newcameramtx[0, 0]
         fy = newcameramtx[1, 1]
         cx = newcameramtx[0, 2]
@@ -75,7 +72,7 @@ class FrontAprilTagNode(Node):
         detections = self.detector.detect(
             gray, 
             estimate_tag_pose=True, 
-            camera_params=current_params, # Use the undistorted params
+            camera_params=current_params, 
             tag_size=self.tag_size
         )
 
@@ -91,19 +88,16 @@ class FrontAprilTagNode(Node):
             
             self.pose_pub.publish(pose_msg)
 
-            # Calculate Yaw for Debug
+            # Calculate Yaw 
             yaw = self.get_yaw_from_R(det.pose_R)
 
-            # Debug Drawing
             if self.show_vis:
                 corners = np.array(det.corners, dtype=np.int32).reshape((-1, 1, 2))
                 cv2.polylines(frame, [corners], True, (0, 255, 0), 2)
                 
-                # Draw Center
                 cx_det, cy_det = int(det.center[0]), int(det.center[1])
                 cv2.circle(frame, (cx_det, cy_det), 5, (0, 0, 255), -1)
                 
-                # Info Text
                 label = f"Dist: {det.pose_t[2][0]:.2f}m | Yaw: {yaw:.0f}"
                 cv2.putText(frame, label, (cx_det - 50, cy_det - 15), 
                             cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 2)

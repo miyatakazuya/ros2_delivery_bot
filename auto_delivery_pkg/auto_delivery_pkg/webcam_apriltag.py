@@ -11,7 +11,7 @@ from pupil_apriltags import Detector
 class RearAprilTagNode(Node):
     def __init__(self):
         super().__init__('apriltag_rear_node')
-        self.get_logger().info('--- Rear AprilTag Node (Single 9cm) Started ---')
+        self.get_logger().info('--- Rear AprilTag Node Started ---')
 
         self.declare_parameter('show_vis', True)
         self.show_vis = self.get_parameter('show_vis').value
@@ -59,12 +59,12 @@ class RearAprilTagNode(Node):
         ret, raw_frame = self.cap.read()
         if not ret: return
 
-        # 1. Undistort
+        # Undistort
         h, w = raw_frame.shape[:2]
         newcameramtx, roi = cv2.getOptimalNewCameraMatrix(self.K, self.D, (w,h), 1, (w,h))
         frame = cv2.undistort(raw_frame, self.K, self.D, None, newcameramtx)
 
-        # 2. Detect
+        # Detect
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         detections = self.detector.detect(
             gray, 

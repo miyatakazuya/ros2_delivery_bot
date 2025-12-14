@@ -13,7 +13,7 @@ import json
 class OakPerceptionNode(Node):
     def __init__(self):
         super().__init__('oak_perception_node')
-        self.get_logger().info('--- OAK Perception Node (Dual Stream) Started ---')
+        self.get_logger().info('--- OAK Perception Node Started ---')
 
         # --- PARAMETERS ---
         self.declare_parameter('show_vis', True)
@@ -33,7 +33,7 @@ class OakPerceptionNode(Node):
         # --- CONFIG ---
         self.num_classes = 3
         self.label_map = ["Clear Box", "Red Box", "red box"]
-        self.yolo_input_size = 640 # Square for NN
+        self.yolo_input_size = 640 
         
         pkg_share = get_package_share_directory('auto_delivery_pkg')
         self.blob_path = os.path.join(pkg_share, 'models', 'yolov8_n.blob')
@@ -49,18 +49,14 @@ class OakPerceptionNode(Node):
     def init_depthai(self):
         pipeline = dai.Pipeline()
 
-        # 1. RGB Camera
         cam_rgb = pipeline.create(dai.node.ColorCamera)
         cam_rgb.setResolution(dai.ColorCameraProperties.SensorResolution.THE_1080_P)
         cam_rgb.setInterleaved(False)
         cam_rgb.setColorOrder(dai.ColorCameraProperties.ColorOrder.BGR)
         cam_rgb.setFps(30)
         
-        # --- DUAL STREAMS ---
-        # Stream A: 640x640 for YOLO (Preview)
+
         cam_rgb.setPreviewSize(self.yolo_input_size, self.yolo_input_size)
-        
-        # Stream B: 640x480 for AprilTag Calibration (Video/ISP)
         cam_rgb.setVideoSize(640, 480) 
 
         # 2. Detection Network (Uses Preview)
@@ -73,12 +69,9 @@ class OakPerceptionNode(Node):
         detection_nn.setAnchorMasks({}) 
         detection_nn.setIouThreshold(0.5) 
         detection_nn.input.setBlocking(False)
-        
-        # Link Preview -> NN
         cam_rgb.preview.link(detection_nn.input)
 
-        # 3. Outputs
-        # Output Video (640x480) to Host
+
         xout_video = pipeline.create(dai.node.XLinkOut)
         xout_video.setStreamName("video")
         cam_rgb.video.link(xout_video.input)
@@ -110,18 +103,14 @@ class OakPerceptionNode(Node):
         if in_video is not None:
             frame_480 = in_video.getCvFrame() # 640x480
             
-            # Publish RAW image (Calibrated size)
+            # Publish RAW image 
             raw_msg = self.bridge.cv2_to_imgmsg(frame_480, encoding="bgr8")
             self.image_pub.publish(raw_msg)
 
-            # Process YOLO (Using the NN results which ran on the 640x640 preview)
+            # Process YOLO 
             if self.yolo_active and in_nn is not None:
                 detections = in_nn.detections
                 yolo_data_list = []
-
-                # Note: We draw on the 640x480 frame, so we must remap coordinates
-                # YOLO coords are normalized (0-1). 
-                # x * 640, y * 480 works because YOLO is robust to aspect ratio squishing.
                 
                 for det in detections:
                     x1 = int(det.xmin * 640)
